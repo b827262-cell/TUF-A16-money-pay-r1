@@ -45,3 +45,14 @@ export const ocrDocuments = sqliteTable("ocr_documents", {
   reviewStatus: text("review_status").notNull().default("reviewed"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("ocr_documents_created_at_idx").on(table.createdAt)]);
+
+export const portfolioSnapshots = sqliteTable("portfolio_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  snapshotDate: text("snapshot_date").notNull(),
+  positionCount: integer("position_count").notNull().default(0),
+  costBasisTwd: real("cost_basis_twd").notNull().default(0),
+  marketValueTwd: real("market_value_twd").notNull().default(0),
+  pnlTwd: real("pnl_twd").notNull().default(0),
+  dividendTwd: real("dividend_twd").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("portfolio_snapshots_date_unique").on(table.snapshotDate)]);
