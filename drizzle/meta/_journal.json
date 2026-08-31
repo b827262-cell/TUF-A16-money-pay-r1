@@ -15,6 +15,13 @@
       "when": 1788105383694,
       "tag": "0001_living_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788176293329,
+      "tag": "0002_as_of_import_status",
+      "breakpoints": true
     }
   ]
 }
