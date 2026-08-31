@@ -7,8 +7,15 @@ export const imports = sqliteTable("imports", {
   fileHash: text("file_hash").notNull(),
   sourceKind: text("source_kind").notNull(),
   rowCount: integer("row_count").notNull().default(0),
+  asOfDate: text("as_of_date"),
+  status: text("status").notNull().default("pending"),
+  parserVersion: integer("parser_version").notNull().default(1),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [uniqueIndex("imports_file_hash_unique").on(table.fileHash)]);
+}, (table) => [
+  // Same bytes can legitimately describe different statistics dates, so idempotency covers the file plus what it claims to measure.
+  uniqueIndex("imports_file_hash_source_as_of_unique").on(table.fileHash, table.sourceKind, table.asOfDate),
+  index("imports_source_kind_status_as_of_idx").on(table.sourceKind, table.status, table.asOfDate),
+]);
 
 export const positions = sqliteTable("positions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
