@@ -1,4 +1,5 @@
 import type { AssetCategory, IndustryTheme, InvestRegion, InvestStyle, MarketCapTier, PurchaseDateBasis } from "@/lib/position-classification";
+import type { RiskRewardLevel } from "@/lib/fund-risk-reward";
 
 export const PARSER_VERSION = 1;
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -50,6 +51,7 @@ export type PositionRecord = {
   marketCapTier: MarketCapTier | null;
   investStyle: InvestStyle | null;
   industryTheme: IndustryTheme | null;
+  riskRewardLevel: RiskRewardLevel | null;
   sourceKind: string;
 };
 
@@ -155,7 +157,7 @@ const POSITION_COLUMNS = `p.id AS id, p.import_id AS importId, p.asset_code AS a
   p.pnl_twd AS pnlTwd, p.return_pct AS returnPct, p.dividend_twd AS dividendTwd,
   p.valuation_date AS valuationDate, p.last_purchase_date AS lastPurchaseDate, p.purchase_date_basis AS purchaseDateBasis,
   p.asset_category AS assetCategory, p.invest_region AS investRegion, p.market_cap_tier AS marketCapTier,
-  p.invest_style AS investStyle, p.industry_theme AS industryTheme, p.source_kind AS sourceKind`;
+  p.invest_style AS investStyle, p.industry_theme AS industryTheme, p.risk_reward_level AS riskRewardLevel, p.source_kind AS sourceKind`;
 
 /** Positions of the imports that are current as of `asOfDate`; every other batch is history only. */
 function currentPositionsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {

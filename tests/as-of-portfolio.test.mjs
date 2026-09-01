@@ -61,6 +61,7 @@ function openDatabase() {
       market_cap_tier TEXT,
       invest_style TEXT,
       industry_theme TEXT,
+      risk_reward_level TEXT,
       source_kind TEXT NOT NULL
     );
   `);

@@ -1,3 +1,5 @@
+import { lookupFundRiskReward, type RiskRewardLevel } from "@/lib/fund-risk-reward";
+
 export type PurchaseDateBasis = "exact" | "lower_bound" | "unknown";
 export type AssetCategory =
   | "stock_fund" | "bond_fund" | "balanced_fund" | "money_market_fund" | "other_fund"
@@ -23,6 +25,7 @@ export type PositionClassification = {
   marketCapTier: MarketCapTier | null;
   investStyle: InvestStyle | null;
   industryTheme: IndustryTheme | null;
+  riskRewardLevel: RiskRewardLevel | null;
 };
 const PURCHASE_DATE_KEYS = ["購入日", "申購日", "申購日期", "交易日", "成交日期", "PurchaseDate", "TradeDate", "SubscribeDate"];
 const EQUITY_CATEGORIES = new Set<AssetCategory>(["stock_fund", "etf_stock", "stock"]);
@@ -110,7 +113,7 @@ export function inferInvestStyle(category: AssetCategory | null, assetName: stri
 export function inferIndustryTheme(category: AssetCategory | null, assetName: string): IndustryTheme | null {
   if (!category) return null;
   const name = textOf(assetName);
-  if (/科技|technology|ai|人工智慧|半導體/.test(name)) return "technology";
+  if (/科技|technology|ai|人工智慧|半導體|資安|網路安全|cyber|security/.test(name)) return "technology";
   if (/醫療|healthcare|生技/.test(name)) return "healthcare";
   if (/必需消費|consumer staples/.test(name)) return "consumer_staples";
   if (/非必需消費|consumer discretionary/.test(name)) return "consumer_discretionary";
@@ -124,7 +127,7 @@ export function inferIndustryTheme(category: AssetCategory | null, assetName: st
   if (category === "balanced_fund") return "diversified";
   return category === "money_market_fund" || category === "structured" ? "not_applicable" : "unknown";
 }
-export function classifyPosition(input: { assetType: string; assetName: string; raw?: Record<string, string> }): PositionClassification {
+export function classifyPosition(input: { assetCode?: string | null; assetType: string; assetName: string; raw?: Record<string, string> }): PositionClassification {
   const assetCategory = inferAssetCategory(input.assetType, input.assetName);
   const lastPurchaseDate = explicitPurchaseDate(input.raw ?? {});
   return {
@@ -135,6 +138,9 @@ export function classifyPosition(input: { assetType: string; assetName: string; 
     marketCapTier: inferMarketCapTier(assetCategory, input.assetName),
     investStyle: inferInvestStyle(assetCategory, input.assetName),
     industryTheme: inferIndustryTheme(assetCategory, input.assetName),
+    riskRewardLevel: /基金|fund/i.test(input.assetType) || /基金|fund/i.test(input.assetName)
+      ? lookupFundRiskReward(input.assetCode, input.assetName)?.level ?? null
+      : null,
   };
 }
 

@@ -14,3 +14,5 @@
 
 .classification-chips{display:flex;flex-wrap:wrap;gap:.35rem;min-width:12rem}
 .classification-chips [data-slot="badge"]{white-space:nowrap}
+
+.compare-selects [data-slot="select-trigger"]{background:#fff!important;color:#000!important}

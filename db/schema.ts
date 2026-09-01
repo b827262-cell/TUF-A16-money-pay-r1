@@ -40,6 +40,7 @@ export const positions = sqliteTable("positions", {
   marketCapTier: text("market_cap_tier"),
   investStyle: text("invest_style"),
   industryTheme: text("industry_theme"),
+  riskRewardLevel: text("risk_reward_level"),
   sourceKind: text("source_kind").notNull(),
   rawJson: text("raw_json").notNull().default("{}"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -48,6 +49,7 @@ export const positions = sqliteTable("positions", {
   index("positions_import_id_idx").on(table.importId),
   index("positions_asset_category_idx").on(table.assetCategory),
   index("positions_last_purchase_date_idx").on(table.lastPurchaseDate),
+  index("positions_risk_reward_level_idx").on(table.riskRewardLevel),
 ]);
 
 export const ocrDocuments = sqliteTable("ocr_documents", {

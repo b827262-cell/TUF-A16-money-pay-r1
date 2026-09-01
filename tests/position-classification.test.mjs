@@ -53,11 +53,18 @@ test("keeps ambiguous funds broad while preserving an explicit theme", () => {
   assert.equal(gold.industryTheme, "commodity");
   assert.equal(gold.marketCapTier, "not_applicable");
   assert.equal(gold.investStyle, "not_applicable");
+
+  const cyber = classifyPosition({ assetCode: "B20306", assetType: "基金", assetName: "安聯網路資安趨勢AMf2固定月配美元", raw: {} });
+  assert.equal(cyber.industryTheme, "technology");
+  assert.equal(cyber.riskRewardLevel, "RR5");
+  const unknownFund = classifyPosition({ assetCode: "UNKNOWN", assetType: "基金", assetName: "未核實基金", raw: {} });
+  assert.equal(unknownFund.riskRewardLevel, null);
 });
 test("migration backfills only defensible classifications and never invents a purchase date", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`CREATE TABLE positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_code TEXT,
     asset_name TEXT NOT NULL,
     asset_type TEXT NOT NULL
   );`);
@@ -65,14 +72,18 @@ test("migration backfills only defensible classifications and never invents a pu
   db.prepare("INSERT INTO positions (asset_name, asset_type) VALUES (?, ?)").run("PIMCO全球投資級別債券基金", "基金");
   db.prepare("INSERT INTO positions (asset_name, asset_type) VALUES (?, ?)").run("富蘭克林黃金基金", "基金");
   db.prepare("INSERT INTO positions (asset_name, asset_type) VALUES (?, ?)").run("神秘策略 ETF", "ETF");
+  db.prepare("INSERT INTO positions (asset_code, asset_name, asset_type) VALUES (?, ?, ?)").run("1641", "多空策略基金-美元累積", "基金");
+  db.prepare("INSERT INTO positions (asset_code, asset_name, asset_type) VALUES (?, ?, ?)").run("B20306", "安聯網路資安趨勢AMf2固定月配美元", "基金");
 
-  const sql = readFileSync(new URL("../drizzle/0003_glorious_puppet_master.sql", import.meta.url), "utf8");
-  for (const chunk of sql.split("--> statement-breakpoint")) {
-    const statement = chunk.trim();
-    if (statement) db.exec(statement);
+  for (const filename of ["0003_glorious_puppet_master.sql", "0004_fund_risk_reward.sql"]) {
+    const sql = readFileSync(new URL(`../drizzle/${filename}`, import.meta.url), "utf8");
+    for (const chunk of sql.split("--> statement-breakpoint")) {
+      const statement = chunk.trim();
+      if (statement) db.exec(statement);
+    }
   }
 
-  const rows = db.prepare("SELECT asset_name, last_purchase_date, purchase_date_basis, asset_category, invest_region, market_cap_tier, invest_style, industry_theme FROM positions ORDER BY id").all();
+  const rows = db.prepare("SELECT asset_name, last_purchase_date, purchase_date_basis, asset_category, invest_region, market_cap_tier, invest_style, industry_theme, risk_reward_level FROM positions ORDER BY id").all();
   assert.equal(rows[0].last_purchase_date, null);
   assert.equal(rows[0].purchase_date_basis, "unknown");
   assert.equal(rows[0].asset_category, "stock_fund");
@@ -86,5 +97,9 @@ test("migration backfills only defensible classifications and never invents a pu
   assert.equal(rows[2].industry_theme, "commodity");
   assert.equal(rows[3].asset_category, "etf_other");
   assert.equal(rows[3].last_purchase_date, null);
+  assert.equal(rows[4].asset_name, "富蘭克林多空策略基金-美元累積");
+  assert.equal(rows[4].risk_reward_level, "RR3");
+  assert.equal(rows[5].industry_theme, "technology");
+  assert.equal(rows[5].risk_reward_level, "RR5");
   db.close();
 });

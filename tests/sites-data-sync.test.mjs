@@ -42,7 +42,7 @@ function migrate(db, ...files) {
 function createSourceSqlite(name, seed) {
   const path = join(workDir, `${name}.sqlite`);
   const db = new DatabaseSync(path);
-  migrate(db, "0000_sudden_punisher.sql", "0001_living_miss_america.sql", "0002_as_of_import_status.sql", "0003_glorious_puppet_master.sql");
+  migrate(db, "0000_sudden_punisher.sql", "0001_living_miss_america.sql", "0002_as_of_import_status.sql", "0003_glorious_puppet_master.sql", "0004_fund_risk_reward.sql");
   seed(db);
   db.close();
   return path;

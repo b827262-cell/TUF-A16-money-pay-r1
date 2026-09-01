@@ -22,7 +22,7 @@ const REQUIRED_COLUMNS = {
   positions: [
     "id", "import_id", "asset_code", "asset_name", "asset_type", "currency", "units", "avg_cost",
     "market_price", "cost_basis_twd", "market_value_twd", "pnl_twd", "return_pct", "dividend_twd",
-    "valuation_date", "source_kind", "raw_json", "created_at",
+    "valuation_date", "risk_reward_level", "source_kind", "raw_json", "created_at",
   ],
   ocr_documents: ["id", "object_key", "filename", "doc_type", "raw_text", "extracted_json", "confidence", "review_status", "created_at"],
   portfolio_snapshots: ["id", "snapshot_date", "position_count", "cost_basis_twd", "market_value_twd", "pnl_twd", "dividend_twd", "created_at"],
@@ -31,7 +31,7 @@ const REQUIRED_COLUMNS = {
 const MIGRATION_FOR_TABLE = {
   imports: "0000_sudden_punisher.sql",
   ocr_documents: "0000_sudden_punisher.sql",
-  positions: "0000_sudden_punisher.sql",
+  positions: "0004_fund_risk_reward.sql",
   portfolio_snapshots: "0001_living_miss_america.sql",
 };
 
@@ -96,7 +96,7 @@ const POSITION_SELECT = `SELECT id, import_id AS importId, asset_code AS assetCo
         asset_type AS assetType, currency, units, avg_cost AS avgCost, market_price AS marketPrice,
         cost_basis_twd AS costBasisTwd, market_value_twd AS marketValueTwd, pnl_twd AS pnlTwd,
         return_pct AS returnPct, dividend_twd AS dividendTwd, valuation_date AS valuationDate,
-        source_kind AS sourceKind, raw_json AS rawJson
+        risk_reward_level AS riskRewardLevel, source_kind AS sourceKind, raw_json AS rawJson
       FROM positions WHERE import_id = ? ORDER BY id ASC`;
 
 export function readAppliedImports(db) {
