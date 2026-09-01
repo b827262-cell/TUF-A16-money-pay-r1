@@ -22,6 +22,13 @@
       "when": 1788176293329,
       "tag": "0002_as_of_import_status",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788247804393,
+      "tag": "0003_glorious_puppet_master",
+      "breakpoints": true
     }
   ]
 }

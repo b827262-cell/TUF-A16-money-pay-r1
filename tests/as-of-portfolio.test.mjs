@@ -54,6 +54,13 @@ function openDatabase() {
       return_pct REAL NOT NULL DEFAULT 0,
       dividend_twd REAL NOT NULL DEFAULT 0,
       valuation_date TEXT,
+      last_purchase_date TEXT,
+      purchase_date_basis TEXT NOT NULL DEFAULT 'unknown',
+      asset_category TEXT,
+      invest_region TEXT,
+      market_cap_tier TEXT,
+      invest_style TEXT,
+      industry_theme TEXT,
       source_kind TEXT NOT NULL
     );
   `);

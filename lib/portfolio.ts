@@ -1,3 +1,5 @@
+import type { AssetCategory, IndustryTheme, InvestRegion, InvestStyle, MarketCapTier, PurchaseDateBasis } from "@/lib/position-classification";
+
 export const PARSER_VERSION = 1;
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -41,6 +43,13 @@ export type PositionRecord = {
   returnPct: number;
   dividendTwd: number;
   valuationDate: string | null;
+  lastPurchaseDate: string | null;
+  purchaseDateBasis: PurchaseDateBasis;
+  assetCategory: AssetCategory | null;
+  investRegion: InvestRegion | null;
+  marketCapTier: MarketCapTier | null;
+  investStyle: InvestStyle | null;
+  industryTheme: IndustryTheme | null;
   sourceKind: string;
 };
 
@@ -144,7 +153,9 @@ const POSITION_COLUMNS = `p.id AS id, p.import_id AS importId, p.asset_code AS a
   p.asset_type AS assetType, p.currency AS currency, p.units AS units, p.avg_cost AS avgCost,
   p.market_price AS marketPrice, p.cost_basis_twd AS costBasisTwd, p.market_value_twd AS marketValueTwd,
   p.pnl_twd AS pnlTwd, p.return_pct AS returnPct, p.dividend_twd AS dividendTwd,
-  p.valuation_date AS valuationDate, p.source_kind AS sourceKind`;
+  p.valuation_date AS valuationDate, p.last_purchase_date AS lastPurchaseDate, p.purchase_date_basis AS purchaseDateBasis,
+  p.asset_category AS assetCategory, p.invest_region AS investRegion, p.market_cap_tier AS marketCapTier,
+  p.invest_style AS investStyle, p.industry_theme AS industryTheme, p.source_kind AS sourceKind`;
 
 /** Positions of the imports that are current as of `asOfDate`; every other batch is history only. */
 function currentPositionsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {

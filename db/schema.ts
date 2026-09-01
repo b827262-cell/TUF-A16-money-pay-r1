@@ -33,12 +33,21 @@ export const positions = sqliteTable("positions", {
   returnPct: real("return_pct").notNull().default(0),
   dividendTwd: real("dividend_twd").notNull().default(0),
   valuationDate: text("valuation_date"),
+  lastPurchaseDate: text("last_purchase_date"),
+  purchaseDateBasis: text("purchase_date_basis").notNull().default("unknown"),
+  assetCategory: text("asset_category"),
+  investRegion: text("invest_region"),
+  marketCapTier: text("market_cap_tier"),
+  investStyle: text("invest_style"),
+  industryTheme: text("industry_theme"),
   sourceKind: text("source_kind").notNull(),
   rawJson: text("raw_json").notNull().default("{}"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("positions_asset_type_idx").on(table.assetType),
   index("positions_import_id_idx").on(table.importId),
+  index("positions_asset_category_idx").on(table.assetCategory),
+  index("positions_last_purchase_date_idx").on(table.lastPurchaseDate),
 ]);
 
 export const ocrDocuments = sqliteTable("ocr_documents", {
