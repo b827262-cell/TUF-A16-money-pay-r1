@@ -74,6 +74,8 @@ export type PortfolioComparison = {
   metrics: ComparisonMetric[];
 };
 
+export const PACKAGE_COVERAGE_ANCHOR_SOURCE_KIND = "monthly_statement_video";
+
 export class PortfolioQueryError extends Error {}
 
 /** Rejects anything that is not a real, zero-padded calendar date; the as-of filter compares these as text. */
@@ -106,26 +108,36 @@ const IMPORT_COLUMNS = `id, filename, source_kind AS sourceKind, row_count AS ro
  * Statistics date wins over id: a file uploaded later that describes an earlier date must not
  * shadow the newer snapshot of the same source.
  */
-function rankedImportsQuery(asOfDate: string | null) {
+function rankedImportsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
+  const conditions = ["status = 'applied'", "as_of_date IS NOT NULL"];
+  const params: string[] = [];
+  if (minimumAsOfDate) {
+    conditions.push("as_of_date >= ?");
+    params.push(minimumAsOfDate);
+  }
+  if (asOfDate) {
+    conditions.push("as_of_date <= ?");
+    params.push(asOfDate);
+  }
   return {
     sql: `SELECT imports.*, ROW_NUMBER() OVER (PARTITION BY source_kind ORDER BY as_of_date DESC, id DESC) AS rank_no
       FROM imports
-      WHERE status = 'applied' AND as_of_date IS NOT NULL${asOfDate ? " AND as_of_date <= ?" : ""}`,
-    params: asOfDate ? [asOfDate] : [],
+      WHERE ${conditions.join(" AND ")}`,
+    params,
   };
 }
 
-function pickFirstPerKind(columns: string, asOfDate: string | null, orderBy = "") {
-  const { sql, params } = rankedImportsQuery(asOfDate);
+function pickFirstPerKind(columns: string, asOfDate: string | null, minimumAsOfDate: string | null = null, orderBy = "") {
+  const { sql, params } = rankedImportsQuery(asOfDate, minimumAsOfDate);
   return { sql: `SELECT ${columns} FROM (${sql}) WHERE rank_no = 1${orderBy}`, params };
 }
 
-function currentImportIdsQuery(asOfDate: string | null) {
-  return pickFirstPerKind("id", asOfDate);
+function currentImportIdsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
+  return pickFirstPerKind("id", asOfDate, minimumAsOfDate);
 }
 
-function currentImportsQuery(asOfDate: string | null) {
-  return pickFirstPerKind(IMPORT_COLUMNS, asOfDate, " ORDER BY source_kind");
+function currentImportsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
+  return pickFirstPerKind(IMPORT_COLUMNS, asOfDate, minimumAsOfDate, " ORDER BY source_kind");
 }
 
 const POSITION_COLUMNS = `p.id AS id, p.import_id AS importId, p.asset_code AS assetCode, p.asset_name AS assetName,
@@ -135,8 +147,8 @@ const POSITION_COLUMNS = `p.id AS id, p.import_id AS importId, p.asset_code AS a
   p.valuation_date AS valuationDate, p.source_kind AS sourceKind`;
 
 /** Positions of the imports that are current as of `asOfDate`; every other batch is history only. */
-function currentPositionsQuery(asOfDate: string | null) {
-  const { sql, params } = currentImportIdsQuery(asOfDate);
+function currentPositionsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
+  const { sql, params } = currentImportIdsQuery(asOfDate, minimumAsOfDate);
   return {
     sql: `SELECT ${POSITION_COLUMNS}
       FROM positions p
@@ -146,14 +158,14 @@ function currentPositionsQuery(asOfDate: string | null) {
   };
 }
 
-export async function listCurrentImports(db: SqlDatabase, asOfDate: string | null): Promise<ImportRecord[]> {
-  const query = currentImportsQuery(asOfDate);
+export async function listCurrentImports(db: SqlDatabase, asOfDate: string | null, minimumAsOfDate: string | null = null): Promise<ImportRecord[]> {
+  const query = currentImportsQuery(asOfDate, minimumAsOfDate);
   const result = await db.prepare(query.sql).bind(...query.params).all<ImportRecord>();
   return result.results ?? [];
 }
 
-export async function listCurrentPositions(db: SqlDatabase, asOfDate: string | null): Promise<PositionRecord[]> {
-  const query = currentPositionsQuery(asOfDate);
+export async function listCurrentPositions(db: SqlDatabase, asOfDate: string | null, minimumAsOfDate: string | null = null): Promise<PositionRecord[]> {
+  const query = currentPositionsQuery(asOfDate, minimumAsOfDate);
   const result = await db.prepare(query.sql).bind(...query.params).all<PositionRecord>();
   return result.results ?? [];
 }
@@ -187,16 +199,36 @@ export function summarizePositions(positions: PositionRecord[]): PortfolioTotals
   }), { positionCount: 0, costBasisTwd: 0, marketValueTwd: 0, pnlTwd: 0, dividendTwd: 0 });
 }
 
-export async function getPortfolioAsOf(db: SqlDatabase, asOfDate: string | null): Promise<PortfolioAsOf> {
+export async function getPortfolioAsOf(db: SqlDatabase, asOfDate: string | null, options: { minimumAsOfDate?: string | null } = {}): Promise<PortfolioAsOf> {
+  const minimumAsOfDate = options.minimumAsOfDate ?? null;
   const [importsUsed, positions] = await Promise.all([
-    listCurrentImports(db, asOfDate),
-    listCurrentPositions(db, asOfDate),
+    listCurrentImports(db, asOfDate, minimumAsOfDate),
+    listCurrentPositions(db, asOfDate, minimumAsOfDate),
   ]);
   const dataAsOf = importsUsed.reduce<string | null>((latest, item) => {
     if (!item.asOfDate) return latest;
     return !latest || item.asOfDate > latest ? item.asOfDate : latest;
   }, null);
   return { asOfDate, dataAsOf, totals: summarizePositions(positions), positions, importsUsed };
+}
+
+/**
+ * Finds the beginning of the audited handoff window. The anchor source is unique to
+ * this handoff, while legacy production batches remain available outside the window.
+ */
+export async function findPackageCoverageStartDate(db: SqlDatabase): Promise<string | null> {
+  const row = await db.prepare(`SELECT MIN(as_of_date) AS asOfDate
+    FROM imports
+    WHERE status = 'applied' AND source_kind = ? AND as_of_date IS NOT NULL`)
+    .bind(PACKAGE_COVERAGE_ANCHOR_SOURCE_KIND)
+    .first<{ asOfDate: string | null }>();
+  return row?.asOfDate ?? null;
+}
+
+export async function getPackageCoverageAsOf(db: SqlDatabase, asOfDate: string): Promise<PortfolioAsOf> {
+  const coverageStartDate = await findPackageCoverageStartDate(db);
+  if (!coverageStartDate) throw new PortfolioQueryError("尚無可辨識的交付包覆蓋資料");
+  return getPortfolioAsOf(db, asOfDate, { minimumAsOfDate: coverageStartDate });
 }
 
 const COMPARISON_LABELS: Array<{ key: ComparisonMetric["key"]; label: string }> = [
@@ -208,6 +240,21 @@ const COMPARISON_LABELS: Array<{ key: ComparisonMetric["key"]; label: string }> 
 
 export async function comparePortfolioAsOf(db: SqlDatabase, fromDate: string, toDate: string): Promise<PortfolioComparison> {
   const [from, to] = await Promise.all([getPortfolioAsOf(db, fromDate), getPortfolioAsOf(db, toDate)]);
+  return {
+    from,
+    to,
+    metrics: COMPARISON_LABELS.map(({ key, label }) => ({
+      key,
+      label,
+      from: from.totals[key],
+      to: to.totals[key],
+      delta: to.totals[key] - from.totals[key],
+    })),
+  };
+}
+
+export async function comparePackageCoverageAsOf(db: SqlDatabase, fromDate: string, toDate: string): Promise<PortfolioComparison> {
+  const [from, to] = await Promise.all([getPackageCoverageAsOf(db, fromDate), getPackageCoverageAsOf(db, toDate)]);
   return {
     from,
     to,

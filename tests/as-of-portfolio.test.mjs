@@ -18,7 +18,7 @@ after(async () => {
   await vite.close();
 });
 
-const { comparePortfolioAsOf, findImportByContent, getPortfolioAsOf, listAppliedDates } = await vite.ssrLoadModule("/lib/portfolio.ts");
+const { comparePackageCoverageAsOf, comparePortfolioAsOf, findImportByContent, getPackageCoverageAsOf, getPortfolioAsOf, listAppliedDates } = await vite.ssrLoadModule("/lib/portfolio.ts");
 
 const HASH = "f".repeat(64);
 
@@ -155,6 +155,30 @@ test("reports the money delta between two statistics dates", async () => {
   assert.equal(comparison.from.totals.positionCount, 2);
   assert.equal(comparison.to.totals.positionCount, 2);
   assert.deepEqual(comparison.from.importsUsed.map((item) => item.asOfDate), ["2026-08-24", "2026-08-24"]);
+});
+
+test("package coverage excludes legacy production batches while carrying handoff batches forward", async () => {
+  const sqlite = openDatabase();
+  addBatch(sqlite, { filename: "legacy-stock.csv", sourceKind: "stock_csv", asOfDate: "2026-08-30", positions: [{ assetName: "舊證券", marketValueTwd: 100 }] });
+  addBatch(sqlite, { filename: "legacy-fund.csv", sourceKind: "fund_csv", asOfDate: "2026-08-30", positions: [{ assetName: "舊基金", assetType: "基金", marketValueTwd: 200 }] });
+  addBatch(sqlite, { filename: "legacy-ocr.csv", sourceKind: "fund_detail_ocr", asOfDate: "2026-08-30", positions: [{ assetName: "舊 OCR", assetType: "基金", marketValueTwd: 300 }] });
+  addBatch(sqlite, { filename: "handoff-video.mp4", sourceKind: "monthly_statement_video", asOfDate: "2026-08-31", positions: [{ assetName: "交付基金 A", assetType: "基金", marketValueTwd: 400 }] });
+  addBatch(sqlite, { filename: "handoff-ocr.csv", sourceKind: "fund_detail_ocr", asOfDate: "2026-08-31", positions: [{ assetName: "交付基金 B", assetType: "基金", marketValueTwd: 500 }] });
+  addBatch(sqlite, { filename: "handoff-stock.csv", sourceKind: "stock_csv", asOfDate: "2026-09-01", positions: [{ assetName: "交付證券", marketValueTwd: 600 }] });
+  addBatch(sqlite, { filename: "handoff-fund.csv", sourceKind: "fund_csv", asOfDate: "2026-09-01", positions: [{ assetName: "交付基金 C", assetType: "基金", marketValueTwd: 700 }] });
+
+  const comparison = await comparePackageCoverageAsOf(asD1(sqlite), "2026-08-31", "2026-09-01");
+  assert.equal(comparison.from.totals.positionCount, 2);
+  assert.equal(comparison.from.totals.marketValueTwd, 900);
+  assert.equal(comparison.to.totals.positionCount, 4);
+  assert.equal(comparison.to.totals.marketValueTwd, 2200);
+  assert.deepEqual(comparison.from.importsUsed.map((item) => item.filename), ["handoff-ocr.csv", "handoff-video.mp4"]);
+  assert.deepEqual(comparison.to.importsUsed.map((item) => item.filename), ["handoff-fund.csv", "handoff-ocr.csv", "handoff-video.mp4", "handoff-stock.csv"]);
+
+  const production = await getPortfolioAsOf(asD1(sqlite), "2026-08-31");
+  assert.equal(production.totals.marketValueTwd, 1200);
+  const packageOn31 = await getPackageCoverageAsOf(asD1(sqlite), "2026-08-31");
+  assert.equal(packageOn31.totals.marketValueTwd, 900);
 });
 
 test("lists every applied statistics date for the comparison picker", async () => {
