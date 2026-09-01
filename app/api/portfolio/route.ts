@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { ocrDocuments } from "../../../db/schema";
 import { getPortfolioAsOf, listAppliedDates, listImportHistory, parseAsOfDate, PortfolioQueryError } from "@/lib/portfolio";
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const [portfolio, importRows, ocrRows, availableDates] = await Promise.all([
       getPortfolioAsOf(env.DB, asOfDate),
       listImportHistory(env.DB),
-      db.select({ id: ocrDocuments.id, filename: ocrDocuments.filename, docType: ocrDocuments.docType, confidence: ocrDocuments.confidence, reviewStatus: ocrDocuments.reviewStatus, createdAt: ocrDocuments.createdAt }).from(ocrDocuments).orderBy(desc(ocrDocuments.createdAt)).limit(20),
+      db.select({ id: ocrDocuments.id, filename: ocrDocuments.filename, docType: ocrDocuments.docType, confidence: ocrDocuments.confidence, reviewStatus: ocrDocuments.reviewStatus, createdAt: ocrDocuments.createdAt }).from(ocrDocuments).where(eq(ocrDocuments.reviewStatus, "reviewed")).orderBy(desc(ocrDocuments.createdAt)).limit(20),
       listAppliedDates(env.DB),
     ]);
     return Response.json({
