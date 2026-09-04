@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return env.DB.prepare(`INSERT INTO positions
         (import_id, asset_code, asset_name, asset_type, currency, units, avg_cost, market_price, cost_basis_twd, market_value_twd, pnl_twd, return_pct, dividend_twd, valuation_date,
          last_purchase_date, purchase_date_basis, asset_category, invest_region, market_cap_tier, invest_style, industry_theme, risk_reward_level, source_kind, raw_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(importId, row.assetCode ?? null, row.assetName, row.assetType, row.currency ?? "TWD", row.units ?? 0, row.avgCost ?? 0, row.marketPrice ?? 0,
           row.costBasisTwd ?? 0, row.marketValueTwd ?? 0, row.pnlTwd ?? 0, row.returnPct ?? 0, row.dividendTwd ?? 0, row.valuationDate ?? null,
           classification.lastPurchaseDate, classification.purchaseDateBasis, classification.assetCategory, classification.investRegion,
