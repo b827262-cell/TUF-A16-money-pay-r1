@@ -157,7 +157,67 @@ const POSITION_COLUMNS = `p.id AS id, p.import_id AS importId, p.asset_code AS a
   p.pnl_twd AS pnlTwd, p.return_pct AS returnPct, p.dividend_twd AS dividendTwd,
   p.valuation_date AS valuationDate, p.last_purchase_date AS lastPurchaseDate, p.purchase_date_basis AS purchaseDateBasis,
   p.asset_category AS assetCategory, p.invest_region AS investRegion, p.market_cap_tier AS marketCapTier,
-  p.invest_style AS investStyle, p.industry_theme AS industryTheme, p.risk_reward_level AS riskRewardLevel, p.source_kind AS sourceKind`;
+  p.invest_style AS investStyle, p.industry_theme AS industryTheme, p.risk_reward_level AS riskRewardLevel, p.source_kind AS sourceKind,
+  p.raw_json AS rawJson`;
+
+type StoredPositionRecord = PositionRecord & { rawJson?: string | null };
+
+function parseRawNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const parsed = Number(text.replace(/[,%+\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRawRecord(rawJson: string | null | undefined): Record<string, unknown> {
+  if (!rawJson) return {};
+  try {
+    const parsed = JSON.parse(rawJson);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Some handoff sources expose value and return but omit cost. Recover only what the
+ * source itself makes calculable; never estimate a cost from a name, category, or RR.
+ */
+function normalizeStoredPosition(position: StoredPositionRecord, options: { keepRawJson?: boolean } = {}): PositionRecord & { rawJson?: string | null } {
+  const raw = parseRawRecord(position.rawJson);
+  const rawNumber = (key: string) => parseRawNumber(raw[key]);
+  const units = position.units !== 0 ? position.units : rawNumber("數量") ?? rawNumber("可用數量") ?? 0;
+  const avgCost = position.avgCost !== 0 ? position.avgCost : rawNumber("均價_平均申購淨值") ?? 0;
+  const marketPrice = position.marketPrice !== 0 ? position.marketPrice : rawNumber("市價_最新淨值") ?? 0;
+  let costBasisTwd = position.costBasisTwd;
+  let marketValueTwd = position.marketValueTwd;
+
+  if (costBasisTwd === 0) {
+    const explicitCost = rawNumber("成本");
+    if (explicitCost !== null) {
+      costBasisTwd = explicitCost;
+    } else {
+      const sourceValue = marketValueTwd !== 0 ? marketValueTwd : rawNumber("市值");
+      // For a total-return source, cost = value - ex-dividend P&L. Falling back to
+      // the plain P&L is safe for rows that do not expose a separate return field.
+      const sourcePnl = rawNumber("不含息損益") ?? rawNumber("損益");
+      if (sourceValue !== null && sourcePnl !== null) costBasisTwd = sourceValue - sourcePnl;
+      else if (units !== 0 && avgCost !== 0) costBasisTwd = units * avgCost;
+    }
+  }
+
+  if (marketValueTwd === 0) {
+    const explicitValue = rawNumber("市值");
+    if (explicitValue !== null) marketValueTwd = explicitValue;
+    else if (units !== 0 && marketPrice !== 0) marketValueTwd = units * marketPrice;
+  }
+
+  const publicPosition = { ...position };
+  delete publicPosition.rawJson;
+  const normalized = { ...publicPosition, costBasisTwd, marketValueTwd };
+  return options.keepRawJson ? { ...normalized, rawJson: position.rawJson ?? "{}" } : normalized;
+}
 
 /** Positions of the imports that are current as of `asOfDate`; every other batch is history only. */
 function currentPositionsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
@@ -179,8 +239,8 @@ export async function listCurrentImports(db: SqlDatabase, asOfDate: string | nul
 
 export async function listCurrentPositions(db: SqlDatabase, asOfDate: string | null, minimumAsOfDate: string | null = null): Promise<PositionRecord[]> {
   const query = currentPositionsQuery(asOfDate, minimumAsOfDate);
-  const result = await db.prepare(query.sql).bind(...query.params).all<PositionRecord>();
-  return result.results ?? [];
+  const result = await db.prepare(query.sql).bind(...query.params).all<StoredPositionRecord>();
+  return (result.results ?? []).map(normalizeStoredPosition);
 }
 
 export async function listImportHistory(db: SqlDatabase, limit = 20): Promise<ImportRecord[]> {

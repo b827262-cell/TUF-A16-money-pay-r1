@@ -99,10 +99,62 @@ const POSITION_SELECT = `SELECT id, import_id AS importId, asset_code AS assetCo
         risk_reward_level AS riskRewardLevel, source_kind AS sourceKind, raw_json AS rawJson
       FROM positions WHERE import_id = ? ORDER BY id ASC`;
 
+function parseRawNumber(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const parsed = Number(text.replace(/[,%+\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRawRecord(rawJson) {
+  if (!rawJson) return {};
+  try {
+    const parsed = JSON.parse(rawJson);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Keep the sync plan aligned with lib/portfolio.ts when a handoff row omits cost/value. */
+export function normalizeStoredPosition(position, { keepRawJson = false } = {}) {
+  const raw = parseRawRecord(position.rawJson);
+  const rawNumber = (key) => parseRawNumber(raw[key]);
+  const units = position.units !== 0 ? position.units : rawNumber("數量") ?? rawNumber("可用數量") ?? 0;
+  const avgCost = position.avgCost !== 0 ? position.avgCost : rawNumber("均價_平均申購淨值") ?? 0;
+  const marketPrice = position.marketPrice !== 0 ? position.marketPrice : rawNumber("市價_最新淨值") ?? 0;
+  let costBasisTwd = position.costBasisTwd;
+  let marketValueTwd = position.marketValueTwd;
+
+  if (costBasisTwd === 0) {
+    const explicitCost = rawNumber("成本");
+    if (explicitCost !== null) {
+      costBasisTwd = explicitCost;
+    } else {
+      const sourceValue = marketValueTwd !== 0 ? marketValueTwd : rawNumber("市值");
+      const sourcePnl = rawNumber("不含息損益") ?? rawNumber("損益");
+      if (sourceValue !== null && sourcePnl !== null) costBasisTwd = sourceValue - sourcePnl;
+      else if (units !== 0 && avgCost !== 0) costBasisTwd = units * avgCost;
+    }
+  }
+
+  if (marketValueTwd === 0) {
+    const explicitValue = rawNumber("市值");
+    if (explicitValue !== null) marketValueTwd = explicitValue;
+    else if (units !== 0 && marketPrice !== 0) marketValueTwd = units * marketPrice;
+  }
+
+  const publicPosition = { ...position };
+  delete publicPosition.rawJson;
+  const normalized = { ...publicPosition, costBasisTwd, marketValueTwd };
+  return keepRawJson ? { ...normalized, rawJson: position.rawJson ?? "{}" } : normalized;
+}
+
 export function readAppliedImports(db) {
   // Oldest statistics date first, so a replay lands history in the order the site saw it.
   const applied = db.prepare(`${IMPORT_SELECT} WHERE status = 'applied' ORDER BY as_of_date ASC, id ASC`).all();
-  return applied.map((record) => ({ ...record, positions: db.prepare(POSITION_SELECT).all(record.id) }));
+  return applied.map((record) => ({ ...record, positions: db.prepare(POSITION_SELECT).all(record.id).map((position) => normalizeStoredPosition(position, { keepRawJson: true })) }));
 }
 
 /** Positions that no applied batch owns: never sent, but always reported so nothing vanishes silently. */
@@ -146,11 +198,12 @@ export function expectedPortfolioAsOf(db, asOfDate) {
         p.asset_type AS assetType, p.currency AS currency, p.units AS units, p.avg_cost AS avgCost,
         p.market_price AS marketPrice, p.cost_basis_twd AS costBasisTwd, p.market_value_twd AS marketValueTwd,
         p.pnl_twd AS pnlTwd, p.return_pct AS returnPct, p.dividend_twd AS dividendTwd,
-        p.valuation_date AS valuationDate, p.source_kind AS sourceKind
+        p.valuation_date AS valuationDate, p.source_kind AS sourceKind, p.raw_json AS rawJson
       FROM positions p
       JOIN (SELECT id FROM (${ranked}) WHERE rank_no = 1) used ON used.id = p.import_id
       ORDER BY p.asset_type, p.asset_name`)
-    .all(...params);
+    .all(...params)
+    .map(normalizeStoredPosition);
   return { asOfDate, dataAsOf: latestDate(importsUsed), totals: summarize(positions), importsUsed };
 }
 
@@ -171,8 +224,8 @@ function summarize(positions) {
 
 /**
  * positions row -> the CanonicalRow that app/api/import/route.ts:4-9 binds.
- * Nulls stay null and numbers stay numbers: the route only applies `?? default`, so an exact
- * pass-through is what makes the deployed row byte-identical to the local one.
+ * The row has already passed through normalizeStoredPosition, so safe source-derived
+ * cost/value fields are carried to the deployed read model while raw_json stays unchanged.
  */
 export function mapPositionToCanonicalRow(position) {
   const reasons = [];

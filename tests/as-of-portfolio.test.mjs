@@ -62,7 +62,8 @@ function openDatabase() {
       invest_style TEXT,
       industry_theme TEXT,
       risk_reward_level TEXT,
-      source_kind TEXT NOT NULL
+      source_kind TEXT NOT NULL,
+      raw_json TEXT NOT NULL DEFAULT '{}'
     );
   `);
   return db;
@@ -88,10 +89,10 @@ function addBatch(sqlite, { filename, fileHash = HASH, sourceKind, asOfDate, sta
     .run(filename, fileHash, sourceKind, positions.length, asOfDate, status);
   const importId = Number(inserted.lastInsertRowid);
   const statement = sqlite.prepare(`INSERT INTO positions
-    (import_id, asset_name, asset_type, currency, units, avg_cost, market_price, cost_basis_twd, market_value_twd, pnl_twd, return_pct, dividend_twd, source_kind)
-    VALUES (?, ?, ?, 'TWD', 0, 0, 0, ?, ?, ?, 0, ?, ?)`);
+    (import_id, asset_name, asset_type, currency, units, avg_cost, market_price, cost_basis_twd, market_value_twd, pnl_twd, return_pct, dividend_twd, source_kind, raw_json)
+    VALUES (?, ?, ?, 'TWD', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`);
   for (const position of positions) {
-    statement.run(importId, position.assetName, position.assetType ?? "證券", position.costBasisTwd ?? 0, position.marketValueTwd, position.pnlTwd ?? 0, position.dividendTwd ?? 0, sourceKind);
+    statement.run(importId, position.assetName, position.assetType ?? "證券", position.units ?? 0, position.avgCost ?? 0, position.marketPrice ?? 0, position.costBasisTwd ?? 0, position.marketValueTwd ?? 0, position.pnlTwd ?? 0, position.dividendTwd ?? 0, sourceKind, JSON.stringify(position.raw ?? {}));
   }
   return importId;
 }
@@ -163,6 +164,26 @@ test("reports the money delta between two statistics dates", async () => {
   assert.equal(comparison.from.totals.positionCount, 2);
   assert.equal(comparison.to.totals.positionCount, 2);
   assert.deepEqual(comparison.from.importsUsed.map((item) => item.asOfDate), ["2026-08-24", "2026-08-24"]);
+});
+
+test("recovers omitted source costs without guessing from labels", async () => {
+  const sqlite = openDatabase();
+  addBatch(sqlite, {
+    filename: "integrated-0904.csv",
+    sourceKind: "monthly_statement_video",
+    asOfDate: "2026-09-04",
+    positions: [
+      { assetName: "全球平衡基金", assetType: "基金", marketValueTwd: 314070, pnlTwd: 12431, raw: { "市值": "314070", "損益": "12431" } },
+      { assetName: "貝萊德環球資產配置基金", assetType: "基金", marketValueTwd: 112553, pnlTwd: 510, raw: { "市值": "112553", "含息損益": "510", "不含息損益": "-952" } },
+      { assetName: "元大台灣50反1", assetType: "證券", units: 4746, avgCost: 11.11, marketPrice: 9.86, pnlTwd: -6038, raw: { "數量": "4746", "均價_平均申購淨值": "11.11", "市價_最新淨值": "9.86", "損益": "-6038" } },
+    ],
+  });
+
+  const portfolio = await getPortfolioAsOf(asD1(sqlite), "2026-09-04");
+  assert.equal(portfolio.totals.costBasisTwd, 467872.06);
+  assert.equal(portfolio.totals.marketValueTwd, 473418.56);
+  const yuanDa = portfolio.positions.find((position) => position.assetName === "元大台灣50反1");
+  assert.deepEqual({ cost: yuanDa?.costBasisTwd, value: yuanDa?.marketValueTwd }, { cost: 52728.06, value: 46795.56 });
 });
 
 test("package coverage excludes legacy production batches while carrying handoff batches forward", async () => {
