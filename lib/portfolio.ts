@@ -120,7 +120,7 @@ const IMPORT_COLUMNS = `id, filename, source_kind AS sourceKind, row_count AS ro
  * shadow the newer snapshot of the same source.
  */
 function rankedImportsQuery(asOfDate: string | null, minimumAsOfDate: string | null = null) {
-  const conditions = ["status = 'applied'", "as_of_date IS NOT NULL"];
+  const conditions = ["status = 'applied'", "as_of_date IS NOT NULL", "source_kind <> 'portfolio_csv'"];
   const params: string[] = [];
   if (minimumAsOfDate) {
     conditions.push("as_of_date >= ?");
