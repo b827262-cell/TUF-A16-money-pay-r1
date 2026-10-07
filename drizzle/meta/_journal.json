@@ -29,6 +29,20 @@
       "when": 1788247804393,
       "tag": "0003_glorious_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788260625000,
+      "tag": "0004_fund_risk_reward",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791355913723,
+      "tag": "0005_p2_import_identity",
+      "breakpoints": true
     }
   ]
 }

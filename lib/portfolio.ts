@@ -1,5 +1,6 @@
 import type { AssetCategory, IndustryTheme, InvestRegion, InvestStyle, MarketCapTier, PurchaseDateBasis } from "@/lib/position-classification";
 import type { RiskRewardLevel } from "@/lib/fund-risk-reward";
+import { resolveSupersedesWinner } from "@/lib/p2-contracts";
 
 export const PARSER_VERSION = 1;
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,6 +27,29 @@ export type ImportRecord = {
   status: ImportStatus;
   parserVersion: number;
   createdAt: string;
+  accountKey?: string | null;
+  accountKeyBasis?: string;
+  scopeKey?: string | null;
+  sourceRole?: string;
+  coverageType?: string;
+  logicalImportKey?: string | null;
+  logicalImportKeyVersion?: string | null;
+  sourceNativeImportId?: string | null;
+  supersedesImportId?: number | null;
+};
+
+export type ShadowImportRecord = ImportRecord & {
+  asOfDate: string;
+  status: "applied";
+  accountKey: string;
+  accountKeyBasis: string;
+  scopeKey: string;
+  sourceRole: "authoritative";
+  coverageType: "full";
+  logicalImportKey: string | null;
+  logicalImportKeyVersion: string | null;
+  sourceNativeImportId: string | null;
+  supersedesImportId: number | null;
 };
 
 export type PositionRecord = {
@@ -113,6 +137,13 @@ export function todayInTaipei(now: Date = new Date()): string {
 
 const IMPORT_COLUMNS = `id, filename, source_kind AS sourceKind, row_count AS rowCount,
         as_of_date AS asOfDate, status, parser_version AS parserVersion, created_at AS createdAt`;
+
+const SHADOW_IMPORT_COLUMNS = `i.id AS id, i.filename AS filename, i.source_kind AS sourceKind, i.row_count AS rowCount,
+        i.as_of_date AS asOfDate, i.status AS status, i.parser_version AS parserVersion, i.created_at AS createdAt,
+        i.account_key AS accountKey, i.account_key_basis AS accountKeyBasis, i.scope_key AS scopeKey,
+        i.source_role AS sourceRole, i.coverage_type AS coverageType, i.logical_import_key AS logicalImportKey,
+        i.logical_import_key_version AS logicalImportKeyVersion, i.source_native_import_id AS sourceNativeImportId,
+        i.supersedes_import_id AS supersedesImportId`;
 
 /**
  * Ranked per source_kind so callers can pick the one import that represents a given date.
@@ -240,7 +271,87 @@ export async function listCurrentImports(db: SqlDatabase, asOfDate: string | nul
 export async function listCurrentPositions(db: SqlDatabase, asOfDate: string | null, minimumAsOfDate: string | null = null): Promise<PositionRecord[]> {
   const query = currentPositionsQuery(asOfDate, minimumAsOfDate);
   const result = await db.prepare(query.sql).bind(...query.params).all<StoredPositionRecord>();
-  return (result.results ?? []).map(normalizeStoredPosition);
+  return (result.results ?? []).map((position) => normalizeStoredPosition(position));
+}
+
+export function selectShadowCurrentImports(rows: ShadowImportRecord[]): ShadowImportRecord[] {
+  const groups = new Map<string, ShadowImportRecord[]>();
+  for (const row of rows) {
+    if (!row.accountKey || !row.scopeKey || !row.asOfDate) {
+      throw new PortfolioQueryError("SHADOW_INVALID_GRAIN");
+    }
+    const key = JSON.stringify([row.accountKey, row.scopeKey]);
+    const group = groups.get(key) ?? [];
+    group.push(row);
+    groups.set(key, group);
+  }
+
+  const selected: ShadowImportRecord[] = [];
+  for (const group of groups.values()) {
+    const latestDate = group.reduce((latest, row) => row.asOfDate > latest ? row.asOfDate : latest, group[0].asOfDate);
+    const sameDay = group.filter((row) => row.asOfDate === latestDate);
+    const resolution = resolveSupersedesWinner(sameDay.map((row) => ({
+      id: row.id,
+      accountKey: row.accountKey,
+      scopeKey: row.scopeKey,
+      asOfDate: row.asOfDate,
+      sourceRole: row.sourceRole,
+      supersedesImportId: row.supersedesImportId,
+    })));
+    if (resolution.status !== "UNIQUE") {
+      throw new PortfolioQueryError(`AMBIGUOUS_SAME_DAY:${sameDay[0].accountKey}/${sameDay[0].scopeKey}/${latestDate}:${resolution.reason}`);
+    }
+    const winner = sameDay.find((row) => row.id === resolution.winner.id);
+    if (!winner) throw new PortfolioQueryError("SHADOW_WINNER_NOT_FOUND");
+    selected.push(winner);
+  }
+
+  return selected.sort((a, b) =>
+    a.accountKey.localeCompare(b.accountKey)
+    || a.scopeKey.localeCompare(b.scopeKey)
+    || a.asOfDate.localeCompare(b.asOfDate)
+    || a.filename.localeCompare(b.filename));
+}
+
+export async function listShadowCurrentImports(db: SqlDatabase, asOfDate: string | null): Promise<ShadowImportRecord[]> {
+  const params: string[] = [];
+  const dateFilter = asOfDate ? " AND i.as_of_date <= ?" : "";
+  if (asOfDate) params.push(asOfDate);
+  const result = await db.prepare(`SELECT ${SHADOW_IMPORT_COLUMNS}
+    FROM imports i
+    JOIN cutover_managed_scopes cms
+      ON cms.account_key = i.account_key AND cms.scope_key = i.scope_key
+    WHERE i.status = 'applied'
+      AND i.source_role = 'authoritative'
+      AND i.coverage_type = 'full'
+      AND i.account_key IS NOT NULL
+      AND i.scope_key IS NOT NULL
+      AND i.as_of_date IS NOT NULL
+      AND cms.status IN ('shadow', 'approved')
+      ${dateFilter}
+    ORDER BY i.account_key, i.scope_key, i.as_of_date`).bind(...params).all<ShadowImportRecord>();
+  return selectShadowCurrentImports(result.results ?? []);
+}
+
+export async function listShadowCurrentPositions(db: SqlDatabase, importsUsed: ShadowImportRecord[]): Promise<PositionRecord[]> {
+  if (importsUsed.length === 0) return [];
+  const ids = importsUsed.map((item) => item.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const result = await db.prepare(`SELECT ${POSITION_COLUMNS}
+    FROM positions p
+    WHERE p.import_id IN (${placeholders})
+    ORDER BY p.asset_type, p.asset_name`).bind(...ids).all<StoredPositionRecord>();
+  return (result.results ?? []).map((position) => normalizeStoredPosition(position));
+}
+
+export async function getShadowPortfolioAsOf(db: SqlDatabase, asOfDate: string | null): Promise<PortfolioAsOf> {
+  const importsUsed = await listShadowCurrentImports(db, asOfDate);
+  const positions = await listShadowCurrentPositions(db, importsUsed);
+  const dataAsOf = importsUsed.reduce<string | null>((latest, item) => {
+    if (!item.asOfDate) return latest;
+    return !latest || item.asOfDate > latest ? item.asOfDate : latest;
+  }, null);
+  return { asOfDate, dataAsOf, totals: summarizePositions(positions), positions, importsUsed };
 }
 
 export async function listImportHistory(db: SqlDatabase, limit = 20): Promise<ImportRecord[]> {
