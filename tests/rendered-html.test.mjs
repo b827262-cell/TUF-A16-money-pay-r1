@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import test from "node:test";
+
+register(new URL("./cloudflare-workers-loader.mjs", import.meta.url), import.meta.url);
 
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;

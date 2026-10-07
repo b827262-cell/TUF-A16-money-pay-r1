@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "連薪總署｜投資資料工作站",
   description: "整合 CSV、圖片 OCR 與 SQLite 的個人投資資料分析工作站。",
+  other: {
+    "codex-preview": "development",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
