@@ -35,6 +35,18 @@ type ImportGrainRow = {
   supersedesImportId: number | null;
 };
 
+type LogicalImportRow = {
+  id: number;
+  status: string;
+  fileHash: string;
+  canonicalContentHash: string | null;
+  accountKey: string | null;
+  scopeKey: string | null;
+  asOfDate: string | null;
+  sourceRole: string;
+  supersedesImportId: number | null;
+};
+
 function trimmed(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text || null;
@@ -64,7 +76,7 @@ async function validateSupersedesChain(
     if (visited.has(cursor)) throw new PortfolioQueryError("supersedes chain contains a cycle");
     if (++depth > 1000) throw new PortfolioQueryError("supersedes chain is too deep");
     visited.add(cursor);
-    const row = await env.DB.prepare(`SELECT id, account_key AS accountKey, scope_key AS scopeKey,
+    const row: ImportGrainRow | null = await env.DB.prepare(`SELECT id, account_key AS accountKey, scope_key AS scopeKey,
       as_of_date AS asOfDate, source_role AS sourceRole, supersedes_import_id AS supersedesImportId
       FROM imports WHERE id = ? LIMIT 1`).bind(cursor).first<ImportGrainRow>();
     if (!row) throw new PortfolioQueryError("supersedes target does not exist");
@@ -105,6 +117,11 @@ export async function POST(request: Request) {
     let supersedesImportId: number | null = null;
 
     if (p2) {
+      const missingCurrencyRow = rows.find((row) => !trimmed(row.currency));
+      if (missingCurrencyRow) {
+        return Response.json({ error: "P2 匯入每筆資料都必須明確提供 currency" }, { status: 400 });
+      }
+
       const contract = sourceContractFor(sourceKind);
       const suppliedAccountKey = trimmed(payload.accountKey);
       const suppliedScope = trimmed(payload.scopeKey);
@@ -154,6 +171,9 @@ export async function POST(request: Request) {
         return Response.json({ error: `source_kind=${sourceKind} 的 scope_key 必須是 ${contract.scopeKey}` }, { status: 400 });
       }
       if (!scopeKey) return Response.json({ error: "P2 匯入必須提供可判定的 scope_key" }, { status: 400 });
+      if (!accountKey) return Response.json({ error: "P2 匯入必須提供可判定的 account_key" }, { status: 400 });
+      const resolvedAccountKey = accountKey;
+      const resolvedScopeKey = scopeKey;
 
       sourceRole = payload.sourceRole ?? contract.sourceRole;
       if (sourceRole !== contract.sourceRole) {
@@ -170,8 +190,8 @@ export async function POST(request: Request) {
 
       sourceNativeImportId = trimmed(payload.sourceNativeImportId);
       logicalImportKey = await buildLogicalImportKey({
-        accountKey,
-        scopeKey,
+        accountKey: resolvedAccountKey,
+        scopeKey: resolvedScopeKey,
         sourceKind,
         logicalPeriodKey: asOfDate,
         sourceNativeImportId,
@@ -185,7 +205,7 @@ export async function POST(request: Request) {
           return Response.json({ error: "supersedes_import_id 無效" }, { status: 400 });
         }
         supersedesImportId = candidate;
-        await validateSupersedesChain(candidate, { accountKey, scopeKey, asOfDate, sourceRole });
+        await validateSupersedesChain(candidate, { accountKey: resolvedAccountKey, scopeKey: resolvedScopeKey, asOfDate, sourceRole });
       }
 
       const logicalRowsResult = await env.DB.prepare(`SELECT id, status, file_hash AS fileHash,
@@ -193,12 +213,8 @@ export async function POST(request: Request) {
         account_key AS accountKey, scope_key AS scopeKey, as_of_date AS asOfDate,
         source_role AS sourceRole, supersedes_import_id AS supersedesImportId
         FROM imports WHERE logical_import_key = ?`)
-        .bind(logicalImportKey).all<{
-          id: number; status: string; fileHash: string; canonicalContentHash: string | null;
-          accountKey: string | null; scopeKey: string | null;
-          asOfDate: string | null; sourceRole: string; supersedesImportId: number | null;
-        }>();
-      const logicalRows = logicalRowsResult.results ?? [];
+        .bind(logicalImportKey).all<LogicalImportRow>();
+      const logicalRows: LogicalImportRow[] = logicalRowsResult.results ?? [];
       const sameContent = logicalRows.find((row) => row.canonicalContentHash === canonicalContentHash);
       if (sameContent?.status === "applied") {
         return Response.json({ error: "這個 logical_import_key + canonical_content_hash 已套用，不會重複計算", importId: sameContent.id }, { status: 409 });
